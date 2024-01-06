@@ -1,8 +1,16 @@
-import pytesseract
-from PIL import Image, ImageEnhance, ImageFilter
 import fitz  # PyMuPDF
+import pytesseract
+from PIL import Image, ImageEnhance
 import os
-import datetime
+
+def extract_text_with_fitz(pdf_path):
+    doc = fitz.open(pdf_path)
+    text = ""
+    for page in doc:
+        text += page.get_text()
+        print(f"Page {page.number} extracted by PyMuPDF")
+    doc.close()
+    return text
 
 def preprocess_image(pix):
     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -15,52 +23,39 @@ def preprocess_image(pix):
     img = img.point(lambda x: 0 if x < 128 else 255, '1')
     return img
 
-def extract_text_from_pdf(pdf_path):
+def extract_text_with_ocr(pdf_path):
+    doc = fitz.open(pdf_path)
     text = ""
-    with fitz.open(pdf_path) as doc:
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
-            pix = page.get_pixmap()
-            img = preprocess_image(pix)
-            custom_config = r'--oem 3 --psm 6'
-            text += pytesseract.image_to_string(img, config=custom_config, lang='eng')
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
+        pix = page.get_pixmap()
+        img = preprocess_image(pix)
+        custom_config = r'--oem 3 --psm 6'
+        text += pytesseract.image_to_string(img, config=custom_config, lang='eng')
+        print(f"Page {page_num} extracted by OCR")
+    doc.close()
     return text
 
-def write_text_to_file(filename, text):
-    with open(filename, 'a') as file:
-        file.write(text)
-    print(f"Written to file: {filename}")
-
-def log_extraction(pdf, timestamp):
-    print(f"Extraction terminée pour {pdf} à {timestamp}.")
+def is_text_complete(text, threshold=100):
+    # Vous pouvez ajuster la logique ici pour déterminer si le texte semble complet
+    return len(text) > threshold
 
 def main():
     pdf_directory = os.getcwd()
-    max_size = 1000000  # 1 Mo
-    accumulated_text = ""
-    file_index = 1
-    output_filename = f"extracted_text_{file_index}.txt"
+    output_file = 'combined_text.txt'
 
-    for pdf in os.listdir(pdf_directory):
-        if pdf.endswith('.pdf'):
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            pdf_path = os.path.join(pdf_directory, pdf)
-            extracted_text = extract_text_from_pdf(pdf_path)
-            extracted_text_with_header = f"\n\n--- Start of {pdf} ---\n\n{extracted_text}\n\n--- End of {pdf} ---\n"
+    with open(output_file, 'w') as outfile:
+        for pdf in os.listdir(pdf_directory):
+            if pdf.endswith('.pdf'):
+                pdf_path = os.path.join(pdf_directory, pdf)
+                extracted_text = extract_text_with_fitz(pdf_path)
 
-            if len(accumulated_text.encode('utf-8')) + len(extracted_text_with_header.encode('utf-8')) > max_size:
-                write_text_to_file(output_filename, accumulated_text)
-                accumulated_text = extracted_text_with_header
-                file_index += 1
-                output_filename = f"extracted_text_{file_index}.txt"
-            else:
-                accumulated_text += extracted_text_with_header
+                if not is_text_complete(extracted_text):
+                    extracted_text = extract_text_with_ocr(pdf_path)
 
-            log_extraction(pdf, timestamp)
-
-    # Write any remaining text to a file
-    if accumulated_text:
-        write_text_to_file(output_filename, accumulated_text)
+                outfile.write(f"--- Texte de {pdf} ---\n")
+                outfile.write(extracted_text)
+                outfile.write("\n\n")
 
 if __name__ == "__main__":
     main()
